@@ -244,6 +244,11 @@ public:
         return data.Capacity();
     }
 
+    std::allocator Allocator() const noexcept
+    {
+        return std::allocator<T>();
+    }
+
     size_t MaxSize() const
     {
         return std::numeric_limits<size_t>::max / sizeof(T);
@@ -418,6 +423,18 @@ public:
     template <typename InputIt>
     void Assign(InputIt first_, InputIt last_);
 
+    template <typename InputIt>
+    void AppendRange(InputIt first_, InputIt last_);
+
+    template <typename InputIt>
+    Iterator InsertRange(ConstIterator pos_, InputIt first_, InputIt last_);
+
+    template <typename InputIt>
+    void AssignRange(InputIt first_, InputIt last_);
+
+    template <typename Predicate>
+    void EraseIf(Predicate pred_);
+
 private:
 
     RawMemory<T> data;
@@ -484,7 +501,7 @@ T& Vector<T>::EmplaceBack(Args&&... args_)
 
 template <typename T>
 template <typename... Args>
-typename Vector<T>::Iterator Vector<T>::Emplace(ConstIterator pos_, Args&&... args_)
+Vector<T>::Iterator Vector<T>::Emplace(ConstIterator pos_, Args&&... args_)
 {
     assert(pos_ >= begin() && pos_ <= end());
     int position = pos_ - begin();
@@ -553,6 +570,74 @@ void Vector<T>::Assign(InputIt first_, InputIt last_)
         std::uninitialized_copy(first_, last_, data.GetAddress());
     }
     size = new_size;
+}
+
+template<typename T>
+template <typename InputIt>
+void Vector<T>::AppendRange(InputIt first_, InputIt last_)
+{
+    size_t new_elements_count = std::distance(first_, last_);
+    if (size + new_elements_count > data.Capacity())
+    {
+        Reserve(std::max(data.Capacity() * 2, size + new_elements_count));
+    }
+    std::uninitialized_copy(first_, last_, data.GetAddress() + size);
+    size += new_elements_count;
+}
+
+template<typename T>
+template <typename InputIt>
+Vector<T>::Iterator Vector<T>::InsertRange(ConstIterator pos_, InputIt first_, InputIt last_)
+{
+    assert(pos_ >= begin() && pos_ <= end());
+
+    size_t position = pos_ - begin();
+    size_t new_elements_count = std::distance(first_, last_);
+
+    if (size + new_elements_count > data.Capacity())
+    {
+        RawMemory<T> new_data(std::max(data.Capacity() * 2, size + new_elements_count));
+        std::uninitialized_copy(data.GetAddress(), data.GetAddress() + position, new_data.GetAddress());
+        std::uninitialized_copy(first_, last_, new_data.GetAddress() + position);
+        std::uninitialized_copy(data.GetAddress() + position, data.GetAddress() + size, new_data.GetAddress() + position + new_elements_count);
+        std::destroy_n(data.GetAddress(), size);
+        data.Swap(new_data);
+    }
+    else
+    {
+        std::move_backward(begin() + position, end(), end() + new_elements_count);
+        std::copy(first_, last_, begin() + position);
+    }
+    size += new_elements_count;
+    return begin() + position;
+}
+
+template<typename T>
+template <typename InputIt>
+void Vector<T>::AssignRange(InputIt first_, InputIt last_)
+{
+    Clear();
+    size_t new_size = std::distance(first_, last_);
+    if (new_size > data.Capacity())
+    {
+        RawMemory<T> new_data(new_size);
+        std::uninitialized_copy(first_, last_, new_data.GetAddress());
+        data.Swap(new_data);
+    }
+    else
+    {
+        std::uninitialized_copy(first_, last_, data.GetAddress());
+    }
+    size = new_size;
+}
+
+template<typename T>
+template <typename Predicate>
+void Vector<T>::EraseIf(Predicate pred_)
+{
+    auto new_end = std::remove_if(begin(), end(), pred_);
+    std::destroy(new_end, end());
+    size = std::distance(begin(), new_end);
 }
 
 //-----------------------------------------------------------Implementation of Comparison Operators------------------------------------------
