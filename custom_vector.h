@@ -16,7 +16,12 @@ public:
 
     explicit RawMemory(size_t capacity_) : buffer(Allocate(capacity_)), capacity(capacity_) {}
 
-    RawMemory(RawMemory&& other_) noexcept : buffer(std::exchange(other_.buffer, nullptr)), capacity(std::exchange(other_.capacity, 0)) {}
+    RawMemory(RawMemory&& other_) noexcept
+    {
+        Swap(other_);
+        other_.buffer = nullptr;
+        other_.capacity = 0;
+    }
 
     RawMemory(const RawMemory&) = delete;
 
@@ -25,16 +30,13 @@ public:
         Deallocate(buffer);
     }
 
-    RawMemory& operator=(const RawMemory& rhs) = delete;
+    RawMemory& operator=(const RawMemory&) = delete;
 
     RawMemory& operator=(RawMemory&& rhs_) noexcept
     {
         if (this != &rhs_)
         {
-            buffer = std::move(rhs_.buffer);
-            capacity = std::move(rhs_.capacity);
-            rhs_.buffer = nullptr;
-            rhs_.capacity = 0;
+            Swap(rhs_);
         }
         return *this;
     }
@@ -122,7 +124,10 @@ public:
         std::uninitialized_copy_n(other_.data.GetAddress(), size, data.GetAddress());
     }
 
-    Vector(Vector&& other_) noexcept : data(std::move(other_.data)), size(std::exchange(other_.size, 0)) {}
+    Vector(Vector&& other_) noexcept
+    {
+        Swap(other_);
+    }
 
     Vector(std::initializer_list<T> init_list_) : data(init_list_.size()), size(init_list_.size())
     {
@@ -136,29 +141,29 @@ public:
 
     //----------------------------------------------------------------------Operators----------------------------------------------------------
 
-    Vector& operator=(const Vector& other_)
+    Vector& operator=(const Vector& rhs_)
     {
-        if (this != &other_)
+        if (this != &rhs_)
         {
-            if (other_.size <= data.Capacity())
+            if (rhs_.size > data.Capacity())
             {
-
-                if (size <= other_.size)
-                {
-                    std::copy(other_.data.GetAddress(), other_.data.GetAddress() + size, data.GetAddress());
-                    std::uninitialized_copy_n(other_.data.GetAddress() + size, other_.size - size, data.GetAddress() + size);
-                }
-                else
-                {
-                    std::copy(other_.data.GetAddress(), other_.data.GetAddress() + other_.size, data.GetAddress());
-                    std::destroy_n(data.GetAddress() + other_.size, size - other_.size);
-                }
-                size = other_.size;
+                Vector rhs_copy(rhs_);
+                Swap(rhs_copy);
             }
             else
             {
-                Vector other_copy(other_);
-                Swap(other_copy);
+                size_t copy_size = std::min(size, rhs_.size);
+                std::copy(rhs_.data.GetAddress(), rhs_.data.GetAddress() + copy_size, data.GetAddress());
+
+                if (rhs_.size < size)
+                {
+                    std::destroy_n(data.GetAddress() + rhs_.size, size - rhs_.size);
+                }
+                else
+                {
+                    std::uninitialized_copy_n(rhs_.data.GetAddress() + size, rhs_.size - size, data.GetAddress() + size);
+                }
+                size = rhs_.size;
             }
         }
         return *this;
@@ -166,7 +171,10 @@ public:
 
     Vector& operator=(Vector&& other_) noexcept
     {
-        Swap(other_);
+        if (this != &other_)
+        {
+            Swap(other_);
+        }
         return *this;
     }
 
@@ -244,7 +252,7 @@ public:
         return data.Capacity();
     }
 
-    std::allocator Allocator() const noexcept
+    std::allocator<T> Allocator() const noexcept
     {
         return std::allocator<T>();
     }
@@ -313,7 +321,8 @@ public:
 
     void Swap(Vector& other_) noexcept
     {
-        data.Swap(other_.data), std::swap(size, other_.size);
+        data.Swap(other_.data);
+        std::swap(size, other_.size);
     }
 
     void Reserve(size_t new_capacity_)
@@ -392,7 +401,7 @@ public:
 
     Iterator Erase(ConstIterator pos_)
     {
-        assert(pos_ >= begin() && pos_ <= end());
+        assert(pos_ >= begin() && pos_ < end());
         int position = pos_ - begin();
 
         std::move(begin() + position + 1, end(), begin() + position);
@@ -475,28 +484,8 @@ template <typename T>
 template <typename... Args>
 T& Vector<T>::EmplaceBack(Args&&... args_)
 {
-    if (data.Capacity() <= size)
-    {
-        RawMemory<T> new_data(size == 0 ? 1 : size * 2);
-
-        new (new_data.GetAddress() + size) T(std::forward<Args>(args_)...);
-
-        if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
-        {
-            std::uninitialized_move_n(data.GetAddress(), size, new_data.GetAddress());
-        }
-        else
-        {
-            std::uninitialized_copy_n(data.GetAddress(), size, new_data.GetAddress());
-        }
-        std::destroy_n(data.GetAddress(), size);
-        data.Swap(new_data);
-    }
-    else
-    {
-        new (data.GetAddress() + size) T(std::forward<Args>(args_)...);
-    }
-    return data[size++];
+    Emplace(end(), std::forward<Args>(args_)...);
+    return data[size - 1];
 }
 
 template <typename T>
